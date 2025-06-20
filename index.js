@@ -3,6 +3,10 @@ const cors = require('cors');
 const app = express();
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
+
+const admin = require("firebase-admin");
+const serviceAccount = require("./firebase-admin-key.json");
+
 const port = process.env.PORT || 3000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config()
@@ -15,45 +19,36 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 
-var admin = require("firebase-admin");
-
-var serviceAccount = require("./firebase-admin-key.json");
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+    credential: admin.credential.cert(serviceAccount)
 });
 
 
-const logger = (req, res, next) => {
-    console.log('inside the logger middleware');
-    next();
-}
+// const logger = (req, res, next) => {
+//     console.log('inside the logger middleware');
+//     next();
+// }
 
-const verifyToken = (req, res, next) => {
-    const token = req?.cookies?.token;
-    console.log('cookies in middleware', token)
-    if (!token) {
+
+const verifyFirebaseToken = async (req, res, next) => {
+    const authHeader = req.headers?.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).send({ message: 'unauthorized access' })
     }
-    jwt.verify(token, process.env.JWT_ACCESS_SECRET, (err, decoded) => {
-        if (err) {
-            return res.status(401).send({ message: 'unauthorized access' })
-        }
+
+    const token = authHeader.split(' ')[1];
+
+    try {
+        const decoded = await admin.auth().verifyIdToken(token);
+        console.log('decoded token', decoded);
         req.decoded = decoded;
         next();
-    })
-}
-
-const verifyFirebaseToken = async(req, res, next) =>{
-  const authHeader = req.headers?.authorization;
-  const token = authHeader.split(' ')[1];
-  if(!token){
-      return res.status(401).send({message: 'unauthorized access'})
     }
-    const userInfo = await admin.auth().verifyIdToken(token);
-    console.log('firebase token', userInfo);
-  req.tokenEmail = userInfo.email;
-  next();
+    catch (error) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
 }
 
 
@@ -72,22 +67,22 @@ const client = new MongoClient(uri, {
 async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
+        // await client.connect();
 
         const jobsCollection = client.db('careerCode').collection('jobs');
         const applicationsCollection = client.db('careerCode').collection('applications')
 
-        // jwt token related api
-        app.post('/jwt', async (req, res) => {
-            const userInfo = req.body;
-            const token = jwt.sign(userInfo, process.env.JWT_ACCESS_SECRET, { expiresIn: '1h' });
- 
-            res.cookie('token', token, {
-                httpOnly: true,
-                secure: false,
-            })
-            res.send({ success: true })
-        })
+        // // jwt token related api
+        // app.post('/jwt', async (req, res) => {
+        //     const userInfo = req.body;
+        //     const token = jwt.sign(userInfo, process.env.JWT_ACCESS_SECRET, { expiresIn: '1h' });
+
+        //     res.cookie('token', token, {
+        //         httpOnly: true,
+        //         secure: false,
+        //     })
+        //     res.send({ success: true })
+        // })
 
         // jobs api
         app.get('/jobs', async (req, res) => {
@@ -102,8 +97,13 @@ async function run() {
             res.send(result);
         });
 
-        app.get('/jobs/applications', async (req, res) => {
+        app.get('/jobs/applications', verifyFirebaseToken, async (req, res) => {
             const email = req.query.email;
+
+            if (email !== req.decoded.email) {
+                return res.status(403).send({ message: 'forbidden access' })
+            }
+
             const query = { hr_email: email };
             const jobs = await jobsCollection.find(query).toArray();
 
@@ -132,10 +132,10 @@ async function run() {
 
 
         // job applications related apis
-        app.get('/applications', logger, verifyFirebaseToken, async (req, res) => {
+        app.get('/applications', verifyFirebaseToken, async (req, res) => {
             const email = req.query.email;
 
-            if (req.tokenEmail != email) {
+            if (email !== req.decoded.email) {
                 return res.status(403).send({ message: 'forbidden access' })
             }
 
@@ -184,8 +184,8 @@ async function run() {
 
 
         // Send a ping to confirm a successful connection
-        await client.db("admin").command({ ping: 1 });
-        console.log("Pinged your deployment. You successfully connected to MongoDB!");
+        // await client.db("admin").command({ ping: 1 });
+        // console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
         // Ensures that the client will close when you finish/error
         // await client.close();
