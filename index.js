@@ -5,7 +5,8 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 
 const admin = require("firebase-admin");
-const serviceAccount = require("./firebase-admin-key.json");
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
 
 const port = process.env.PORT || 3000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
@@ -13,7 +14,7 @@ require('dotenv').config()
 
 // middleware
 app.use(cors({
-    origin: ['http://localhost:5173'],
+    origin: ['https://career-code-b3829.web.app'],
     credentials: true
 }));
 app.use(express.json());
